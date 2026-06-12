@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Model caches / downloaded weights
+models/
+*.pt
+*.bin
+*.safetensors
+
+# Local env / secrets
+.env
