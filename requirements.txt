@@ -1,4 +1,5 @@
 pdfplumber
+pygame
 
 # Torch must be installed separately with the CUDA index for GPU support:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu128

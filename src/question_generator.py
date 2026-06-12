@@ -1,7 +1,5 @@
 """Generate interview questions from resume text using a local Hugging Face LLM."""
 
-from __future__ import annotations
-
 import re
 
 DEFAULT_MODEL = "microsoft/Phi-3.5-mini-instruct"
