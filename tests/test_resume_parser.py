@@ -1,5 +1,3 @@
-"""Tests for resume_parser."""
-
 from pathlib import Path
 
 import pytest
