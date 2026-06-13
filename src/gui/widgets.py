@@ -91,6 +91,10 @@ class TextBox:
                 self.text += event.unicode
             self._scroll_to_bottom()
 
+    def set_text(self, text: str) -> None:
+        self.text = text
+        self._scroll_to_bottom()
+
     def _paste(self) -> None:
         try:
             data = pygame.scrap.get(pygame.SCRAP_TEXT)
