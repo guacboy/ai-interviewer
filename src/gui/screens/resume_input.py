@@ -14,6 +14,8 @@ from .base import Screen
 
 NUM_QUESTIONS = 5
 
+#TODO: add drag&drop pdf feature
+#TODO: add loading bar when generating questions
 
 class ResumeInputScreen(Screen):
     def __init__(self, app):

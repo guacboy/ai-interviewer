@@ -1,13 +1,19 @@
 """Questions screen: displays generated interview questions with navigation."""
 
+import threading
+
 import pygame
 
+from audio_recorder import AudioRecorder
+from transcriber import transcribe_audio
+
 from .. import constants as c
-from ..widgets import Button, wrap_text
+from ..widgets import Button, TextBox, wrap_text
 from .base import Screen
 
 #TODO: remove temp prev and next btn, and replace with skip btn
 #TODO: add an "interviewer" with the questions appearing on top as an overlay
+
 
 class QuestionsScreen(Screen):
     def __init__(self, app):
@@ -17,7 +23,14 @@ class QuestionsScreen(Screen):
         button_font = pygame.font.SysFont(None, 32)
 
         self.questions: list[str] = []
+        self.answers: list[str] = []
         self.index = 0
+
+        self.recorder = AudioRecorder()
+        self.is_recording = False
+        self._transcribe_worker: threading.Thread | None = None
+        self._transcribe_result: tuple[int, str] | None = None
+        self._transcribe_error: str | None = None
 
         self.prev_button = Button((60, c.SCREEN_HEIGHT - 90, 140, 50), "Previous", button_font, on_click=self._prev)
         self.next_button = Button(
@@ -29,30 +42,116 @@ class QuestionsScreen(Screen):
             button_font,
             on_click=lambda: app.switch_to("resume_input"),
         )
+        self.record_button = Button(
+            ((c.SCREEN_WIDTH - 220) // 2, c.SCREEN_HEIGHT - 160, 220, 50),
+            "Record Answer",
+            button_font,
+            on_click=self._toggle_recording,
+        )
+        self.answer_box = TextBox(
+            (60, 280, c.SCREEN_WIDTH - 120, 150),
+            pygame.font.SysFont(None, 24),
+            placeholder="Type your answer here, or record audio above.",
+        )
 
     def on_enter(self, **kwargs) -> None:
+        if self.recorder.is_recording:
+            self.recorder.stop()
+
         self.questions = kwargs.get("questions", [])
+        self.answers = [""] * len(self.questions)
         self.index = 0
+        self.is_recording = False
+        self.record_button.text = "Record Answer"
+        self.record_button.enabled = True
+        self._transcribe_worker = None
+        self._transcribe_result = None
+        self._transcribe_error = None
+        self.answer_box.set_text(self.answers[0] if self.questions else "")
         self._update_buttons()
 
+    def _save_current_answer(self) -> None:
+        if 0 <= self.index < len(self.answers):
+            self.answers[self.index] = self.answer_box.text
+
     def _prev(self) -> None:
-        if self.index > 0:
+        if self.index > 0 and not self._is_busy():
+            self._save_current_answer()
             self.index -= 1
+            self.answer_box.set_text(self.answers[self.index])
             self._update_buttons()
 
     def _next(self) -> None:
-        if self.index < len(self.questions) - 1:
+        if self.index < len(self.questions) - 1 and not self._is_busy():
+            self._save_current_answer()
             self.index += 1
+            self.answer_box.set_text(self.answers[self.index])
             self._update_buttons()
 
+    def _is_busy(self) -> bool:
+        return self.is_recording or bool(self._transcribe_worker and self._transcribe_worker.is_alive())
+
     def _update_buttons(self) -> None:
-        self.prev_button.enabled = self.index > 0
-        self.next_button.enabled = self.index < len(self.questions) - 1
+        busy = self._is_busy()
+        self.prev_button.enabled = self.index > 0 and not busy
+        self.next_button.enabled = self.index < len(self.questions) - 1 and not busy
+        self.restart_button.enabled = not busy
+
+    def _toggle_recording(self) -> None:
+        if self.is_recording:
+            self._stop_recording()
+        else:
+            self._start_recording()
+
+    def _start_recording(self) -> None:
+        self.recorder.start()
+        self.is_recording = True
+        self.record_button.text = "Stop Recording"
+        self._transcribe_error = None
+        self._update_buttons()
+
+    def _stop_recording(self) -> None:
+        audio = self.recorder.stop()
+        self.is_recording = False
+        self.record_button.text = "Record Answer"
+        self.record_button.enabled = False
+
+        index = self.index
+        self._transcribe_worker = threading.Thread(target=self._transcribe, args=(index, audio), daemon=True)
+        self._transcribe_worker.start()
+        self._update_buttons()
+
+    def _transcribe(self, index: int, audio) -> None:
+        try:
+            text = transcribe_audio(audio)
+        except Exception as exc:
+            self._transcribe_error = f"Transcription failed: {exc}"
+            return
+
+        self._transcribe_result = (index, text)
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        self.answer_box.handle_event(event)
+        self.record_button.handle_event(event)
         self.prev_button.handle_event(event)
         self.next_button.handle_event(event)
         self.restart_button.handle_event(event)
+
+    def update(self, dt: float) -> None:
+        self.answer_box.update(dt)
+
+        if self._transcribe_result is not None:
+            index, text = self._transcribe_result
+            self._transcribe_result = None
+            if 0 <= index < len(self.answers):
+                self.answers[index] = text
+                if index == self.index:
+                    self.answer_box.set_text(text)
+            self.record_button.enabled = True
+        elif self._transcribe_error and not (self._transcribe_worker and self._transcribe_worker.is_alive()):
+            self.record_button.enabled = True
+
+        self._update_buttons()
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(c.BACKGROUND)
@@ -67,12 +166,34 @@ class QuestionsScreen(Screen):
             surface.blit(counter, (60, 60))
 
             question = self.questions[self.index]
-            y = 140
+            y = 100
             for line in wrap_text(question, self.question_font, c.SCREEN_WIDTH - 120):
                 rendered = self.question_font.render(line, True, c.TEXT)
                 surface.blit(rendered, (60, y))
                 y += self.question_font.get_linesize() + 6
 
+            self.answer_box.draw(surface)
+            self._draw_recording_status(surface)
+
+        self.record_button.draw(surface)
         self.prev_button.draw(surface)
         self.next_button.draw(surface)
         self.restart_button.draw(surface)
+
+    def _draw_recording_status(self, surface: pygame.Surface) -> None:
+        if self.is_recording:
+            text, color = "Recording... click Stop Recording when finished.\nWARNING: THIS WILL OVERWRITE ANY TEXT", c.ERROR_TEXT
+        elif self._transcribe_worker and self._transcribe_worker.is_alive():
+            text, color = "Transcribing your answer...", c.MUTED_TEXT
+        elif self._transcribe_error:
+            text, color = self._transcribe_error, c.ERROR_TEXT
+        else:
+            return
+
+        lines = text.split("\n")
+        line_height = self.counter_font.get_linesize()
+        y = self.record_button.rect.top - line_height * len(lines) - 8
+        for line in lines:
+            rendered = self.counter_font.render(line, True, color)
+            surface.blit(rendered, rendered.get_rect(centerx=c.SCREEN_WIDTH // 2, y=y))
+            y += line_height
