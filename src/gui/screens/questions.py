@@ -2,17 +2,22 @@
 
 import threading
 
+import numpy as np
 import pygame
 
 from audio_recorder import AudioRecorder
+from emotion_detector import EmotionDetector
 from transcriber import transcribe_audio
 from tts import Speaker
+from webcam import WebcamCapture
 
 from .. import constants as c
 from ..widgets import Button, TextBox, wrap_text
 from .base import Screen
 
 #TODO(feat): add an "interviewer" with the questions appearing on top as an overlay
+
+EMOTION_DETECT_INTERVAL = 2.0
 
 
 class QuestionsScreen(Screen):
@@ -35,6 +40,14 @@ class QuestionsScreen(Screen):
         self.speaker = Speaker()
         self.is_speaking = False
         self._speak_worker: threading.Thread | None = None
+
+        self.webcam = WebcamCapture()
+        self.emotion_detector = EmotionDetector()
+        self.current_emotion: dict | None = None
+        self._emotion_worker: threading.Thread | None = None
+        self._emotion_result: dict | None = None
+        self._emotion_timer = 0.0
+        self.webcam_rect = pygame.Rect(c.SCREEN_WIDTH - 200, 20, 180, 135)
 
         self.prev_button = Button((60, c.SCREEN_HEIGHT - 90, 140, 50), "Previous", button_font, on_click=self._prev)
         self.next_button = Button(
@@ -73,11 +86,16 @@ class QuestionsScreen(Screen):
         self._transcribe_result = None
         self._transcribe_error = None
         self.answer_box.set_text(self.answers[0] if self.questions else "")
+        self.current_emotion = None
+        self._emotion_result = None
+        self._emotion_timer = 0.0
+        self.webcam.start()
         self._update_buttons()
         self._speak_current_question()
 
     def _restart(self) -> None:
         self._stop_speaking()
+        self.webcam.stop()
         self.app.switch_to("resume_input")
 
     def _save_current_answer(self) -> None:
@@ -167,6 +185,32 @@ class QuestionsScreen(Screen):
         self.is_speaking = False
         self._update_buttons()
 
+    def _update_emotion_detection(self, dt: float) -> None:
+        if self._emotion_result is not None:
+            self.current_emotion = self._emotion_result
+            self._emotion_result = None
+
+        if self._emotion_worker and self._emotion_worker.is_alive():
+            return
+
+        self._emotion_timer += dt
+        if self._emotion_timer < EMOTION_DETECT_INTERVAL:
+            return
+
+        self._emotion_timer = 0.0
+        frame = self.webcam.get_frame()
+        if frame is None:
+            return
+
+        self._emotion_worker = threading.Thread(target=self._detect_emotion, args=(frame,), daemon=True)
+        self._emotion_worker.start()
+
+    def _detect_emotion(self, frame: np.ndarray) -> None:
+        try:
+            self._emotion_result = self.emotion_detector.detect(frame)
+        except Exception:
+            self._emotion_result = None
+
     def handle_event(self, event: pygame.event.Event) -> None:
         self.answer_box.handle_event(event)
         self.record_button.handle_event(event)
@@ -179,6 +223,8 @@ class QuestionsScreen(Screen):
 
         if self.is_speaking and self._speak_worker and not self._speak_worker.is_alive():
             self.is_speaking = False
+
+        self._update_emotion_detection(dt)
 
         if self._transcribe_result is not None:
             index, text = self._transcribe_result
@@ -207,18 +253,39 @@ class QuestionsScreen(Screen):
 
             question = self.questions[self.index]
             y = 100
-            for line in wrap_text(question, self.question_font, c.SCREEN_WIDTH - 120):
+            max_question_width = self.webcam_rect.left - 60 - 20
+            for line in wrap_text(question, self.question_font, max_question_width):
                 rendered = self.question_font.render(line, True, c.TEXT)
                 surface.blit(rendered, (60, y))
                 y += self.question_font.get_linesize() + 6
 
             self.answer_box.draw(surface)
             self._draw_recording_status(surface)
+            self._draw_webcam_preview(surface)
 
         self.record_button.draw(surface)
         self.prev_button.draw(surface)
         self.next_button.draw(surface)
         self.restart_button.draw(surface)
+
+    def _draw_webcam_preview(self, surface: pygame.Surface) -> None:
+        frame = self.webcam.get_frame()
+        if frame is not None:
+            rgb = np.ascontiguousarray(frame[:, :, ::-1].swapaxes(0, 1))
+            preview = pygame.surfarray.make_surface(rgb)
+            preview = pygame.transform.smoothscale(preview, self.webcam_rect.size)
+            surface.blit(preview, self.webcam_rect)
+        else:
+            pygame.draw.rect(surface, c.PANEL, self.webcam_rect, border_radius=6)
+            label = self.counter_font.render("Camera unavailable", True, c.MUTED_TEXT)
+            surface.blit(label, label.get_rect(center=self.webcam_rect.center))
+
+        pygame.draw.rect(surface, c.INPUT_BORDER, self.webcam_rect, width=2, border_radius=6)
+
+        if self.current_emotion:
+            text = f"{self.current_emotion['label'].title()} ({self.current_emotion['score']:.0%})"
+            rendered = self.counter_font.render(text, True, c.MUTED_TEXT)
+            surface.blit(rendered, rendered.get_rect(centerx=self.webcam_rect.centerx, top=self.webcam_rect.bottom + 6))
 
     def _draw_recording_status(self, surface: pygame.Surface) -> None:
         if self.is_recording:
