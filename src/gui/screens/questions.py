@@ -15,17 +15,20 @@ from .. import constants as c
 from ..widgets import Button, TextBox, wrap_text
 from .base import Screen
 
-#TODO(feat): add an "interviewer" with the questions appearing on top as an overlay
-
 EMOTION_DETECT_INTERVAL = 2.0
+
+_INTERVIEWER_H = 360
+_OVERLAY_H = _INTERVIEWER_H // 3  # 120 - bottom 1/3 of the interviewer area
+_WEBCAM_W, _WEBCAM_H = 192, 144   # 4:3 aspect ratio
 
 
 class QuestionsScreen(Screen):
     def __init__(self, app):
         super().__init__(app)
-        self.question_font = pygame.font.SysFont(None, 32)
+        self.question_font = pygame.font.SysFont(None, 28)
         self.counter_font = pygame.font.SysFont(None, 22)
-        button_font = pygame.font.SysFont(None, 32)
+        button_font = pygame.font.SysFont(None, 28)
+        nav_font = pygame.font.SysFont(None, 30)
 
         self.questions: list[str] = []
         self.answers: list[str] = []
@@ -47,28 +50,43 @@ class QuestionsScreen(Screen):
         self._emotion_worker: threading.Thread | None = None
         self._emotion_result: dict | None = None
         self._emotion_timer = 0.0
-        self.webcam_rect = pygame.Rect(c.SCREEN_WIDTH - 200, 20, 180, 135)
 
-        self.prev_button = Button((60, c.SCREEN_HEIGHT - 90, 140, 50), "Previous", button_font, on_click=self._prev)
-        self.next_button = Button(
-            (c.SCREEN_WIDTH - 200, c.SCREEN_HEIGHT - 90, 140, 50), "Next", button_font, on_click=self._next
+        # Layout rects
+        self.interviewer_rect = pygame.Rect(0, 0, c.SCREEN_WIDTH, _INTERVIEWER_H)
+        self.overlay_rect = pygame.Rect(
+            10, _INTERVIEWER_H - _OVERLAY_H, c.SCREEN_WIDTH - 20, _OVERLAY_H
+        )  # (10, 240, 940, 120)
+        self.webcam_rect = pygame.Rect(20, _INTERVIEWER_H + 10, _WEBCAM_W, _WEBCAM_H)
+
+        # Small nav arrow buttons — bottom-right corner of the question overlay
+        _nav_y = self.overlay_rect.bottom - 8 - 34
+        _nav_right_x = self.overlay_rect.right - 8 - 34
+        self.nav_right_button = Button((_nav_right_x, _nav_y, 34, 34), ">", nav_font, on_click=self._next)
+        self.nav_left_button = Button((_nav_right_x - 8 - 34, _nav_y, 34, 34), "<", nav_font, on_click=self._prev)
+
+        # Answer box — to the right of the webcam feed
+        _ans_x = self.webcam_rect.right + 20
+        _ans_y = self.webcam_rect.top
+        _ans_w = c.SCREEN_WIDTH - _ans_x - 20
+        _ans_h = 100
+        self.answer_box = TextBox(
+            (_ans_x, _ans_y, _ans_w, _ans_h),
+            pygame.font.SysFont(None, 24),
+            placeholder="Type your answer here, or record audio above.",
         )
-        self.restart_button = Button(
-            ((c.SCREEN_WIDTH - 160) // 2, c.SCREEN_HEIGHT - 90, 160, 50),
-            "New Resume",
-            button_font,
-            on_click=self._restart,
-        )
+
+        # Record button — below answer box (leaving vertical room for status text)
         self.record_button = Button(
-            ((c.SCREEN_WIDTH - 220) // 2, c.SCREEN_HEIGHT - 160, 220, 50),
+            (_ans_x, _ans_y + _ans_h + 50, 200, 42),
             "Record Answer",
             button_font,
             on_click=self._toggle_recording,
         )
-        self.answer_box = TextBox(
-            (60, 280, c.SCREEN_WIDTH - 120, 150),
-            pygame.font.SysFont(None, 24),
-            placeholder="Type your answer here, or record audio above.",
+        self.restart_button = Button(
+            (c.SCREEN_WIDTH - 220, c.SCREEN_HEIGHT - 50, 200, 40),
+            "New Resume",
+            button_font,
+            on_click=self._restart,
         )
 
     def on_enter(self, **kwargs) -> None:
@@ -125,8 +143,8 @@ class QuestionsScreen(Screen):
 
     def _update_buttons(self) -> None:
         busy = self._is_busy()
-        self.prev_button.enabled = self.index > 0 and not busy
-        self.next_button.enabled = self.index < len(self.questions) - 1 and not busy
+        self.nav_left_button.enabled = self.index > 0 and not busy
+        self.nav_right_button.enabled = self.index < len(self.questions) - 1 and not busy
         self.restart_button.enabled = not busy
         self.record_button.enabled = not self.is_speaking and not (
             self._transcribe_worker and self._transcribe_worker.is_alive()
@@ -214,8 +232,8 @@ class QuestionsScreen(Screen):
     def handle_event(self, event: pygame.event.Event) -> None:
         self.answer_box.handle_event(event)
         self.record_button.handle_event(event)
-        self.prev_button.handle_event(event)
-        self.next_button.handle_event(event)
+        self.nav_left_button.handle_event(event)
+        self.nav_right_button.handle_event(event)
         self.restart_button.handle_event(event)
 
     def update(self, dt: float) -> None:
@@ -241,34 +259,50 @@ class QuestionsScreen(Screen):
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(c.BACKGROUND)
+        self._draw_interviewer(surface)
 
         if not self.questions:
             empty = self.question_font.render("No questions generated.", True, c.MUTED_TEXT)
-            surface.blit(empty, empty.get_rect(center=(c.SCREEN_WIDTH // 2, c.SCREEN_HEIGHT // 2)))
+            surface.blit(empty, empty.get_rect(center=self.interviewer_rect.center))
         else:
-            counter = self.counter_font.render(
-                f"Question {self.index + 1} of {len(self.questions)}", True, c.MUTED_TEXT
-            )
-            surface.blit(counter, (60, 60))
-
-            question = self.questions[self.index]
-            y = 100
-            max_question_width = self.webcam_rect.left - 60 - 20
-            for line in wrap_text(question, self.question_font, max_question_width):
-                rendered = self.question_font.render(line, True, c.TEXT)
-                surface.blit(rendered, (60, y))
-                y += self.question_font.get_linesize() + 6
-
+            self._draw_question_overlay(surface)
             self.answer_box.draw(surface)
             self._draw_recording_status(surface)
-            self._draw_webcam_preview(surface)
 
+        self._draw_webcam(surface)
         self.record_button.draw(surface)
-        self.prev_button.draw(surface)
-        self.next_button.draw(surface)
         self.restart_button.draw(surface)
 
-    def _draw_webcam_preview(self, surface: pygame.Surface) -> None:
+    def _draw_interviewer(self, surface: pygame.Surface) -> None:
+        pygame.draw.rect(surface, c.PANEL, self.interviewer_rect)
+        label = self.counter_font.render("Interviewer", True, c.MUTED_TEXT)
+        surface.blit(label, label.get_rect(center=(self.interviewer_rect.centerx, self.interviewer_rect.centery - 60)))
+
+    def _draw_question_overlay(self, surface: pygame.Surface) -> None:
+        overlay = pygame.Surface(self.overlay_rect.size, pygame.SRCALPHA)
+        overlay.fill((*c.BACKGROUND, 195))
+        surface.blit(overlay, self.overlay_rect)
+
+        counter = self.counter_font.render(
+            f"Q{self.index + 1} / {len(self.questions)}", True, c.MUTED_TEXT
+        )
+        surface.blit(counter, (self.overlay_rect.x + 12, self.overlay_rect.y + 10))
+
+        # Question text — leave right margin for nav arrows
+        nav_reserved = 8 + 34 + 8 + 34 + 8
+        max_w = self.overlay_rect.width - 24 - nav_reserved
+        y = self.overlay_rect.y + 32
+        for line in wrap_text(self.questions[self.index], self.question_font, max_w):
+            if y + self.question_font.get_linesize() > self.overlay_rect.bottom - 8:
+                break
+            rendered = self.question_font.render(line, True, c.TEXT)
+            surface.blit(rendered, (self.overlay_rect.x + 12, y))
+            y += self.question_font.get_linesize() + 4
+
+        self.nav_left_button.draw(surface)
+        self.nav_right_button.draw(surface)
+
+    def _draw_webcam(self, surface: pygame.Surface) -> None:
         frame = self.webcam.get_frame()
         if frame is not None:
             rgb = np.ascontiguousarray(frame[:, :, ::-1].swapaxes(0, 1))
@@ -276,16 +310,21 @@ class QuestionsScreen(Screen):
             preview = pygame.transform.smoothscale(preview, self.webcam_rect.size)
             surface.blit(preview, self.webcam_rect)
         else:
-            pygame.draw.rect(surface, c.PANEL, self.webcam_rect, border_radius=6)
+            pygame.draw.rect(surface, c.PANEL, self.webcam_rect, border_radius=10)
             label = self.counter_font.render("Camera unavailable", True, c.MUTED_TEXT)
             surface.blit(label, label.get_rect(center=self.webcam_rect.center))
 
-        pygame.draw.rect(surface, c.INPUT_BORDER, self.webcam_rect, width=2, border_radius=6)
+        pygame.draw.rect(surface, c.INPUT_BORDER, self.webcam_rect, width=2, border_radius=10)
 
+        # Emotion label — semi-transparent badge in the top-left corner of the webcam
         if self.current_emotion:
             text = f"{self.current_emotion['label'].title()} ({self.current_emotion['score']:.0%})"
-            rendered = self.counter_font.render(text, True, c.MUTED_TEXT)
-            surface.blit(rendered, rendered.get_rect(centerx=self.webcam_rect.centerx, top=self.webcam_rect.bottom + 6))
+            tw, th = self.counter_font.size(text)
+            badge = pygame.Surface((tw + 12, th + 6), pygame.SRCALPHA)
+            badge.fill((0, 0, 0, 160))
+            surface.blit(badge, (self.webcam_rect.x + 5, self.webcam_rect.y + 5))
+            rendered = self.counter_font.render(text, True, c.TEXT)
+            surface.blit(rendered, (self.webcam_rect.x + 11, self.webcam_rect.y + 8))
 
     def _draw_recording_status(self, surface: pygame.Surface) -> None:
         if self.is_recording:
@@ -301,8 +340,8 @@ class QuestionsScreen(Screen):
 
         lines = text.split("\n")
         line_height = self.counter_font.get_linesize()
-        y = self.record_button.rect.top - line_height * len(lines) - 8
+        y = self.record_button.rect.top - line_height * len(lines) - 6
         for line in lines:
             rendered = self.counter_font.render(line, True, color)
-            surface.blit(rendered, rendered.get_rect(centerx=c.SCREEN_WIDTH // 2, y=y))
+            surface.blit(rendered, (self.answer_box.rect.x, y))
             y += line_height
