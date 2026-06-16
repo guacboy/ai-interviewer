@@ -42,13 +42,13 @@ class ResumeInputScreen(Screen):
         )
 
         self.generate_button = Button(
-            (60, c.SCREEN_HEIGHT - 90, 220, 50),
+            (c.SCREEN_WIDTH - 60 - 260, c.SCREEN_HEIGHT - 90, 260, 50),
             "Generate Questions",
             button_font,
             on_click=self._start_generation,
         )
         self.back_button = Button(
-            (c.SCREEN_WIDTH - 60 - 140, c.SCREEN_HEIGHT - 90, 140, 50),
+            (60, c.SCREEN_HEIGHT - 90, 140, 50),
             "Back",
             button_font,
             on_click=lambda: app.switch_to("home"),
@@ -169,14 +169,7 @@ class ResumeInputScreen(Screen):
         surface.blit(text, (x + check.get_width() + 8, self._upload_status_y))
 
     def _draw_divider(self, surface: pygame.Surface) -> None:
-        label = self.divider_font.render("or", True, c.MUTED_TEXT)
-        label_rect = label.get_rect(center=(c.SCREEN_WIDTH // 2, self._divider_y))
-
-        margin, gap = 60, 16
+        margin = 60
         pygame.draw.line(
-            surface, c.INPUT_BORDER, (margin, self._divider_y), (label_rect.left - gap, self._divider_y), 2
+            surface, c.INPUT_BORDER, (margin, self._divider_y), (c.SCREEN_WIDTH - margin, self._divider_y), 2
         )
-        pygame.draw.line(
-            surface, c.INPUT_BORDER, (label_rect.right + gap, self._divider_y), (c.SCREEN_WIDTH - margin, self._divider_y), 2
-        )
-        surface.blit(label, label_rect)
