@@ -5,6 +5,7 @@ import pygame
 from . import constants as c
 from .screens.home import HomeScreen
 from .screens.questions import QuestionsScreen
+from .screens.results import ResultsScreen
 from .screens.resume_input import ResumeInputScreen
 
 
@@ -25,6 +26,7 @@ class App:
             "home": HomeScreen(self),
             "resume_input": ResumeInputScreen(self),
             "questions": QuestionsScreen(self),
+            "results": ResultsScreen(self),
         }
         self.current_name = "home"
         self.current = self.screens[self.current_name]

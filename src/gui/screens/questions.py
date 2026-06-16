@@ -50,6 +50,7 @@ class QuestionsScreen(Screen):
         self._emotion_worker: threading.Thread | None = None
         self._emotion_result: dict | None = None
         self._emotion_timer = 0.0
+        self.emotion_history: list[dict | None] = []
 
         # Layout rects
         self.interviewer_rect = pygame.Rect(0, 0, c.SCREEN_WIDTH, _INTERVIEWER_H)
@@ -58,13 +59,13 @@ class QuestionsScreen(Screen):
         )  # (10, 240, 940, 120)
         self.webcam_rect = pygame.Rect(20, _INTERVIEWER_H + 10, _WEBCAM_W, _WEBCAM_H)
 
-        # Small nav arrow buttons — bottom-right corner of the question overlay
+        # Small nav arrow buttons
         _nav_y = self.overlay_rect.bottom - 8 - 34
         _nav_right_x = self.overlay_rect.right - 8 - 34
         self.nav_right_button = Button((_nav_right_x, _nav_y, 34, 34), ">", nav_font, on_click=self._next)
         self.nav_left_button = Button((_nav_right_x - 8 - 34, _nav_y, 34, 34), "<", nav_font, on_click=self._prev)
 
-        # Answer box — to the right of the webcam feed
+        # Answer box
         _ans_x = self.webcam_rect.right + 20
         _ans_y = self.webcam_rect.top
         _ans_w = c.SCREEN_WIDTH - _ans_x - 20
@@ -75,7 +76,7 @@ class QuestionsScreen(Screen):
             placeholder="Type your answer here, or record audio above.",
         )
 
-        # Record button — below answer box (leaving vertical room for status text)
+        # Record button
         self.record_button = Button(
             (_ans_x, _ans_y + _ans_h + 50, 200, 42),
             "Record Answer",
@@ -87,6 +88,12 @@ class QuestionsScreen(Screen):
             "New Resume",
             button_font,
             on_click=self._restart,
+        )
+        self.finish_button = Button(
+            (20, c.SCREEN_HEIGHT - 50, 200, 40),
+            "Finish Interview",
+            button_font,
+            on_click=self._finish,
         )
 
     def on_enter(self, **kwargs) -> None:
@@ -107,6 +114,7 @@ class QuestionsScreen(Screen):
         self.current_emotion = None
         self._emotion_result = None
         self._emotion_timer = 0.0
+        self.emotion_history = [None] * len(self.questions)
         self.webcam.start()
         self._update_buttons()
         self._speak_current_question()
@@ -124,6 +132,7 @@ class QuestionsScreen(Screen):
         if self.index > 0 and not self._is_busy():
             self._stop_speaking()
             self._save_current_answer()
+            self.emotion_history[self.index] = self.current_emotion
             self.index -= 1
             self.answer_box.set_text(self.answers[self.index])
             self._update_buttons()
@@ -133,6 +142,7 @@ class QuestionsScreen(Screen):
         if self.index < len(self.questions) - 1 and not self._is_busy():
             self._stop_speaking()
             self._save_current_answer()
+            self.emotion_history[self.index] = self.current_emotion
             self.index += 1
             self.answer_box.set_text(self.answers[self.index])
             self._update_buttons()
@@ -141,11 +151,26 @@ class QuestionsScreen(Screen):
     def _is_busy(self) -> bool:
         return self.is_recording or bool(self._transcribe_worker and self._transcribe_worker.is_alive())
 
+    def _finish(self) -> None:
+        if self._is_busy():
+            return
+        self._stop_speaking()
+        self._save_current_answer()
+        self.emotion_history[self.index] = self.current_emotion
+        self.webcam.stop()
+        self.app.switch_to(
+            "results",
+            questions=list(self.questions),
+            answers=list(self.answers),
+            emotion_history=list(self.emotion_history),
+        )
+
     def _update_buttons(self) -> None:
         busy = self._is_busy()
         self.nav_left_button.enabled = self.index > 0 and not busy
         self.nav_right_button.enabled = self.index < len(self.questions) - 1 and not busy
         self.restart_button.enabled = not busy
+        self.finish_button.enabled = not busy and bool(self.questions)
         self.record_button.enabled = not self.is_speaking and not (
             self._transcribe_worker and self._transcribe_worker.is_alive()
         )
@@ -235,6 +260,7 @@ class QuestionsScreen(Screen):
         self.nav_left_button.handle_event(event)
         self.nav_right_button.handle_event(event)
         self.restart_button.handle_event(event)
+        self.finish_button.handle_event(event)
 
     def update(self, dt: float) -> None:
         self.answer_box.update(dt)
@@ -271,6 +297,7 @@ class QuestionsScreen(Screen):
 
         self._draw_webcam(surface)
         self.record_button.draw(surface)
+        self.finish_button.draw(surface)
         self.restart_button.draw(surface)
 
     def _draw_interviewer(self, surface: pygame.Surface) -> None:
@@ -288,7 +315,7 @@ class QuestionsScreen(Screen):
         )
         surface.blit(counter, (self.overlay_rect.x + 12, self.overlay_rect.y + 10))
 
-        # Question text — leave right margin for nav arrows
+        # Question text
         nav_reserved = 8 + 34 + 8 + 34 + 8
         max_w = self.overlay_rect.width - 24 - nav_reserved
         y = self.overlay_rect.y + 32
@@ -316,7 +343,7 @@ class QuestionsScreen(Screen):
 
         pygame.draw.rect(surface, c.INPUT_BORDER, self.webcam_rect, width=2, border_radius=10)
 
-        # Emotion label — semi-transparent badge in the top-left corner of the webcam
+        # Emotion label
         if self.current_emotion:
             text = f"{self.current_emotion['label'].title()} ({self.current_emotion['score']:.0%})"
             tw, th = self.counter_font.size(text)
