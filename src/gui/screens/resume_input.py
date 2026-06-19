@@ -14,8 +14,8 @@ from .base import Screen
 
 NUM_QUESTIONS = 5
 
-#TODO: add drag&drop pdf feature
-#TODO: add loading bar when generating questions
+#TODO(feat): add drag&drop pdf feature
+#TODO(feat): add loading bar when generating questions
 
 class ResumeInputScreen(Screen):
     def __init__(self, app):
@@ -36,9 +36,20 @@ class ResumeInputScreen(Screen):
         self._divider_y = 185
 
         self.text_box = TextBox(
-            (60, 210, c.SCREEN_WIDTH - 120, c.SCREEN_HEIGHT - 340),
+            (60, 210, c.SCREEN_WIDTH - 120, 82),
             pygame.font.SysFont(None, 24),
             placeholder="Or paste your resume text here...",
+        )
+
+        self.focus_box = TextBox(
+            (60, 320, c.SCREEN_WIDTH - 120, 50),
+            pygame.font.SysFont(None, 24),
+            placeholder="Leave blank for everything.",
+        )
+        self.job_desc_box = TextBox(
+            (60, 400, c.SCREEN_WIDTH - 120, 82),
+            pygame.font.SysFont(None, 24),
+            placeholder="Leave blank for more general questions.",
         )
 
         self.generate_button = Button(
@@ -65,6 +76,8 @@ class ResumeInputScreen(Screen):
         self._result = None
         self._uploaded_path = None
         self._uploaded_name = None
+        self.focus_box.set_text("")
+        self.job_desc_box.set_text("")
         self.generate_button.enabled = True
 
     def _start_generation(self) -> None:
@@ -76,9 +89,14 @@ class ResumeInputScreen(Screen):
             self._error = "Please paste your resume text or upload a file."
             return
 
+        focus = self.focus_box.text.strip()
+        job_description = self.job_desc_box.text.strip()
+
         self._error = None
         self.generate_button.enabled = False
-        self._worker = threading.Thread(target=self._generate, args=(source,), daemon=True)
+        self._worker = threading.Thread(
+            target=self._generate, args=(source, focus, job_description), daemon=True
+        )
         self._worker.start()
 
     def _upload_file(self) -> None:
@@ -104,10 +122,15 @@ class ResumeInputScreen(Screen):
             self._uploaded_path = path
             self._uploaded_name = Path(path).name
 
-    def _generate(self, source: str) -> None:
+    def _generate(self, source: str, focus: str = "", job_description: str = "") -> None:
         try:
             resume_text = load_resume(source)
-            questions = generate_questions(resume_text, num_questions=NUM_QUESTIONS)
+            questions = generate_questions(
+                resume_text,
+                num_questions=NUM_QUESTIONS,
+                focus=focus,
+                job_description=job_description,
+            )
         except Exception as exc:
             self._error = f"Failed to generate questions: {exc}"
             return
@@ -116,12 +139,16 @@ class ResumeInputScreen(Screen):
 
     def handle_event(self, event: pygame.event.Event) -> None:
         self.text_box.handle_event(event)
+        self.focus_box.handle_event(event)
+        self.job_desc_box.handle_event(event)
         self.upload_button.handle_event(event)
         self.generate_button.handle_event(event)
         self.back_button.handle_event(event)
 
     def update(self, dt: float) -> None:
         self.text_box.update(dt)
+        self.focus_box.update(dt)
+        self.job_desc_box.update(dt)
 
         if self._result is not None:
             resume_text, questions = self._result
@@ -138,6 +165,18 @@ class ResumeInputScreen(Screen):
         self._draw_upload_status(surface)
         self._draw_divider(surface)
         self.text_box.draw(surface)
+
+        focus_label = self.divider_font.render(
+            "What would you like the interviewer to focus on?", True, c.MUTED_TEXT
+        )
+        surface.blit(focus_label, (60, 300))
+        self.focus_box.draw(surface)
+
+        job_label = self.divider_font.render(
+            "Paste the job description you are applying for.", True, c.MUTED_TEXT
+        )
+        surface.blit(job_label, (60, 380))
+        self.job_desc_box.draw(surface)
 
         is_generating = bool(self._worker and self._worker.is_alive())
         if is_generating:
@@ -158,15 +197,10 @@ class ResumeInputScreen(Screen):
         if not self._uploaded_name:
             return
 
-        check = self.status_font.render("✓", True, c.SUCCESS_TEXT)
         text = self.status_font.render(
-            f"{self._uploaded_name} has been uploaded successfully.", True, c.SUCCESS_TEXT
+            f"{self._uploaded_name} uploaded successfully.", True, c.SUCCESS_TEXT
         )
-
-        total_width = check.get_width() + 8 + text.get_width()
-        x = (c.SCREEN_WIDTH - total_width) // 2
-        surface.blit(check, (x, self._upload_status_y))
-        surface.blit(text, (x + check.get_width() + 8, self._upload_status_y))
+        surface.blit(text, text.get_rect(centerx=c.SCREEN_WIDTH // 2, y=self._upload_status_y))
 
     def _draw_divider(self, surface: pygame.Surface) -> None:
         margin = 60

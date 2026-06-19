@@ -14,12 +14,19 @@ _SYSTEM_PROMPT = (
 _LIST_PREFIX_RE = re.compile(r"^\s*(?:\d+[.)]|[-*])\s*")
 
 
-def build_messages(resume_text: str, num_questions: int = 5) -> list[dict[str, str]]:
+def build_messages(
+    resume_text: str,
+    num_questions: int = 5,
+    focus: str = "",
+    job_description: str = "",
+) -> list[dict[str, str]]:
     """Build the chat messages sent to the LLM for question generation."""
-    user_prompt = (
-        f"Resume:\n{resume_text}\n\n"
-        f"Generate {num_questions} interview questions based on this resume."
-    )
+    user_prompt = f"Resume:\n{resume_text}\n\n"
+    if job_description:
+        user_prompt += f"Job Description:\n{job_description}\n\n"
+    if focus:
+        user_prompt += f"Focus area: {focus}\n\n"
+    user_prompt += f"Generate {num_questions} interview questions based on this resume."
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
@@ -65,11 +72,13 @@ def generate_questions(
     resume_text: str,
     num_questions: int = 5,
     model_name: str = DEFAULT_MODEL,
+    focus: str = "",
+    job_description: str = "",
 ) -> list[str]:
     """Generate interview questions tailored to the given resume text."""
     tokenizer, model = _load_model(model_name)
 
-    messages = build_messages(resume_text, num_questions)
+    messages = build_messages(resume_text, num_questions, focus=focus, job_description=job_description)
     inputs = tokenizer.apply_chat_template(
         messages,
         return_tensors="pt",
