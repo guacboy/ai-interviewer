@@ -14,7 +14,6 @@ from .base import Screen
 
 NUM_QUESTIONS = 5
 
-#TODO(feat): add drag&drop pdf feature
 #TODO(feat): add loading bar when generating questions
 
 class ResumeInputScreen(Screen):
@@ -38,7 +37,7 @@ class ResumeInputScreen(Screen):
         self.text_box = TextBox(
             (60, 210, c.SCREEN_WIDTH - 120, 82),
             pygame.font.SysFont(None, 24),
-            placeholder="Or paste your resume text here...",
+            placeholder="Or paste your resume text here.",
         )
 
         self.focus_box = TextBox(
@@ -138,12 +137,23 @@ class ResumeInputScreen(Screen):
         self._result = (resume_text, questions)
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.DROPFILE:
+            self._handle_drop(event.file)
         self.text_box.handle_event(event)
         self.focus_box.handle_event(event)
         self.job_desc_box.handle_event(event)
         self.upload_button.handle_event(event)
         self.generate_button.handle_event(event)
         self.back_button.handle_event(event)
+
+    def _handle_drop(self, path: str) -> None:
+        suffix = Path(path).suffix.lower()
+        if suffix not in (".pdf", ".txt"):
+            self._error = f"Unsupported file type: {suffix}. Please drop a PDF or TXT file."
+            return
+        self._error = None
+        self._uploaded_path = path
+        self._uploaded_name = Path(path).name
 
     def update(self, dt: float) -> None:
         self.text_box.update(dt)
@@ -194,12 +204,14 @@ class ResumeInputScreen(Screen):
         self.back_button.draw(surface)
 
     def _draw_upload_status(self, surface: pygame.Surface) -> None:
-        if not self._uploaded_name:
-            return
-
-        text = self.status_font.render(
-            f"{self._uploaded_name} uploaded successfully.", True, c.SUCCESS_TEXT
-        )
+        if self._uploaded_name:
+            text = self.status_font.render(
+                f"{self._uploaded_name} uploaded successfully.", True, c.SUCCESS_TEXT
+            )
+        else:
+            text = self.status_font.render(
+                "or drag&drop a PDF/TXT file anywhere on this screen.", True, c.MUTED_TEXT
+            )
         surface.blit(text, text.get_rect(centerx=c.SCREEN_WIDTH // 2, y=self._upload_status_y))
 
     def _draw_divider(self, surface: pygame.Surface) -> None:
