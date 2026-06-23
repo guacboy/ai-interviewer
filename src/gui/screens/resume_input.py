@@ -14,7 +14,7 @@ from .base import Screen
 
 NUM_QUESTIONS = 5
 
-#TODO(feat): add loading bar when generating questions
+#TODO(chore): disable back button when generating questions
 
 class ResumeInputScreen(Screen):
     def __init__(self, app):
@@ -69,6 +69,8 @@ class ResumeInputScreen(Screen):
         self._error: str | None = None
         self._uploaded_path: str | None = None
         self._uploaded_name: str | None = None
+        self._loading_timer = 0.0
+        self._loading_bar_rect = pygame.Rect(60, c.SCREEN_HEIGHT - 130, c.SCREEN_WIDTH - 120, 22)
 
     def on_enter(self, **kwargs) -> None:
         self._error = None
@@ -160,6 +162,11 @@ class ResumeInputScreen(Screen):
         self.focus_box.update(dt)
         self.job_desc_box.update(dt)
 
+        if self._worker and self._worker.is_alive():
+            self._loading_timer += dt
+        else:
+            self._loading_timer = 0.0
+
         if self._result is not None:
             resume_text, questions = self._result
             self._result = None
@@ -188,16 +195,10 @@ class ResumeInputScreen(Screen):
         surface.blit(job_label, (60, 380))
         self.job_desc_box.draw(surface)
 
-        is_generating = bool(self._worker and self._worker.is_alive())
-        if is_generating:
-            status_text, color = "Generating questions... this may take a minute.", c.MUTED_TEXT
+        if self._worker and self._worker.is_alive():
+            self._draw_loading_bar(surface)
         elif self._error:
-            status_text, color = self._error, c.ERROR_TEXT
-        else:
-            status_text, color = "", c.MUTED_TEXT
-
-        if status_text:
-            status = self.status_font.render(status_text, True, color)
+            status = self.status_font.render(self._error, True, c.ERROR_TEXT)
             surface.blit(status, (60, c.SCREEN_HEIGHT - 130))
 
         self.generate_button.draw(surface)
@@ -213,6 +214,21 @@ class ResumeInputScreen(Screen):
                 "or drag&drop a PDF/TXT file anywhere on this screen.", True, c.MUTED_TEXT
             )
         surface.blit(text, text.get_rect(centerx=c.SCREEN_WIDTH // 2, y=self._upload_status_y))
+
+    def _draw_loading_bar(self, surface: pygame.Surface) -> None:
+        rect = self._loading_bar_rect
+        pygame.draw.rect(surface, c.INPUT_BG, rect, border_radius=6)
+        pygame.draw.rect(surface, c.INPUT_BORDER, rect, width=2, border_radius=6)
+
+        block_w = rect.width * 0.3
+        travel = rect.width - block_w
+        t = (self._loading_timer * 0.6) % 2.0
+        progress = t if t <= 1.0 else 2.0 - t
+        block = pygame.Rect(int(rect.x + progress * travel), rect.y, int(block_w), rect.height)
+        pygame.draw.rect(surface, c.ACCENT, block, border_radius=6)
+
+        label = self.status_font.render("Generating questions...", True, c.TEXT)
+        surface.blit(label, label.get_rect(center=rect.center))
 
     def _draw_divider(self, surface: pygame.Surface) -> None:
         margin = 60
